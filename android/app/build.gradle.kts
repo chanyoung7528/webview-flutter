@@ -31,10 +31,24 @@ android {
     }
 
     buildTypes {
+        debug {
+            // 디버그 빌드 최적화
+            isMinifyEnabled = false
+            isShrinkResources = false
+            // 빠른 빌드를 위한 설정
+            isDebuggable = true
+        }
         release {
             // TODO: Add your own signing config for the release build.
             // Signing with the debug keys for now, so `flutter run --release` works.
             signingConfig = signingConfigs.getByName("debug")
+        }
+    }
+    
+    // 빌드 성능 최적화
+    packaging {
+        resources {
+            excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }
     }
 }
