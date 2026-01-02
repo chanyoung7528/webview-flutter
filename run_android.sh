@@ -18,7 +18,22 @@ if [ -z "$EMULATOR_NAME" ]; then
 fi
 
 echo "✅ 에뮬레이터 실행: $EMULATOR_NAME"
-emulator -avd "$EMULATOR_NAME" > /dev/null 2>&1 &
+
+# 이미 실행 중인 에뮬레이터 확인
+RUNNING_EMULATOR=$(adb devices | grep "emulator" | awk '{print $1}' | head -n 1)
+if [ -n "$RUNNING_EMULATOR" ]; then
+    echo "✅ 에뮬레이터가 이미 실행 중입니다: $RUNNING_EMULATOR"
+else
+    # 성능 최적화 옵션 추가: 하드웨어 가속, 빠른 부팅, GPU 가속
+    # -no-boot-anim: 부팅 애니메이션 제거로 빠른 부팅
+    # -no-audio: 오디오 비활성화로 성능 향상
+    # -gpu host: 호스트 GPU 사용으로 가속
+    emulator -avd "$EMULATOR_NAME" \
+      -gpu host \
+      -no-boot-anim \
+      -no-audio \
+      > /dev/null 2>&1 &
+fi
 
 # 에뮬레이터가 부팅될 때까지 대기
 echo "⏳ 에뮬레이터 부팅 대기 중..."

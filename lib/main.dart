@@ -2,6 +2,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:webview_flutter/webview_flutter.dart';
+import 'package:webview_flutter_android/webview_flutter_android.dart';
 
 void main() {
   runApp(const MyApp());
@@ -34,6 +35,7 @@ class WebViewPage extends StatefulWidget {
 class _WebViewPageState extends State<WebViewPage> {
   late final WebViewController controller;
   bool isLoading = true;
+  String? errorMessage;
 
   String _getLocalhostUrl() {
     // Android 에뮬레이터의 경우 10.0.2.2가 호스트 머신의 localhost를 가리킴
@@ -62,35 +64,141 @@ class _WebViewPageState extends State<WebViewPage> {
 
     controller = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
+      ..setBackgroundColor(Colors.white)
       ..setNavigationDelegate(
         NavigationDelegate(
           onPageStarted: (String url) {
-            setState(() {
-              isLoading = true;
-            });
+            if (mounted) {
+              setState(() {
+                isLoading = true;
+              });
+            }
           },
           onPageFinished: (String url) {
-            setState(() {
-              isLoading = false;
-            });
+            if (mounted) {
+              setState(() {
+                isLoading = false;
+              });
+            }
           },
           onWebResourceError: (WebResourceError error) {
             debugPrint('WebView error: ${error.description}');
+            debugPrint('Error code: ${error.errorCode}');
+            debugPrint('Error type: ${error.errorType}');
+            debugPrint('Failed URL: ${error.url}');
+            // 에러 발생 시 로딩 상태 해제 및 에러 메시지 표시
+            if (mounted) {
+              setState(() {
+                isLoading = false;
+                errorMessage = '연결 오류: ${error.description}\n'
+                    'URL: ${error.url}\n'
+                    '에러 코드: ${error.errorCode}';
+              });
+            }
           },
         ),
-      )
-      ..loadRequest(Uri.parse(_getLocalhostUrl()));
+      );
+    
+    // Android WebView 특정 설정: Mixed Content 허용
+    if (Platform.isAndroid) {
+      final androidController = controller.platform as AndroidWebViewController;
+      androidController.setMediaPlaybackRequiresUserGesture(false);
+    }
+    
+    // URL 로드
+    try {
+      final url = _getLocalhostUrl();
+      debugPrint('Loading URL: $url');
+      controller.loadRequest(Uri.parse(url));
+    } catch (e) {
+      debugPrint('Error loading URL: $e');
+      if (mounted) {
+        setState(() {
+          isLoading = false;
+        });
+      }
+    }
   }
 
   @override
   Widget build(BuildContext context) {
+    final url = _getLocalhostUrl();
+    
     return Scaffold(
+      backgroundColor: Colors.white,
       body: Stack(
         children: [
           WebViewWidget(controller: controller),
           if (isLoading)
-            const Center(
-              child: CircularProgressIndicator(),
+            Container(
+              color: Colors.white,
+              child: const Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    CircularProgressIndicator(),
+                    SizedBox(height: 16),
+                    Text(
+                      '페이지를 불러오는 중...',
+                      style: TextStyle(fontSize: 16, color: Colors.grey),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          if (errorMessage != null && !isLoading)
+            Container(
+              color: Colors.white,
+              padding: const EdgeInsets.all(24),
+              child: Center(
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const Icon(
+                        Icons.error_outline,
+                        size: 64,
+                        color: Colors.red,
+                      ),
+                      const SizedBox(height: 16),
+                      const Text(
+                        '연결 오류',
+                        style: TextStyle(
+                          fontSize: 24,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      Text(
+                        errorMessage!,
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(fontSize: 14, color: Colors.grey),
+                      ),
+                      const SizedBox(height: 24),
+                      Text(
+                        '시도 중인 URL: $url',
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                          fontSize: 12,
+                          color: Colors.blue,
+                          fontFamily: 'monospace',
+                        ),
+                      ),
+                      const SizedBox(height: 24),
+                      ElevatedButton(
+                        onPressed: () {
+                          setState(() {
+                            errorMessage = null;
+                            isLoading = true;
+                          });
+                          controller.reload();
+                        },
+                        child: const Text('다시 시도'),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
             ),
         ],
       ),
