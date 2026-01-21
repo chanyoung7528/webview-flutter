@@ -344,10 +344,46 @@ class _WebViewPageState extends State<WebViewPage> {
   Widget build(BuildContext context) {
     final url = _getLocalhostUrl();
     
-    return Scaffold(
-      backgroundColor: Colors.white,
-      body: Stack(
-        children: [
+    return PopScope(
+      canPop: false, // 기본 뒤로가기 동작 방지
+      onPopInvoked: (bool didPop) async {
+        if (didPop) return;
+        
+        // 웹뷰에서 뒤로 갈 수 있는지 확인
+        if (await controller.canGoBack()) {
+          // 이전 페이지로 이동
+          await controller.goBack();
+        } else {
+          // 더 이상 뒤로 갈 페이지가 없으면 앱 종료 여부 확인
+          if (context.mounted) {
+            final shouldPop = await showDialog<bool>(
+              context: context,
+              builder: (context) => AlertDialog(
+                title: const Text('앱 종료'),
+                content: const Text('앱을 종료하시겠습니까?'),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.of(context).pop(false),
+                    child: const Text('취소'),
+                  ),
+                  TextButton(
+                    onPressed: () => Navigator.of(context).pop(true),
+                    child: const Text('종료'),
+                  ),
+                ],
+              ),
+            );
+            
+            if (shouldPop == true && context.mounted) {
+              SystemNavigator.pop(); // 앱 종료
+            }
+          }
+        }
+      },
+      child: Scaffold(
+        backgroundColor: Colors.white,
+        body: Stack(
+          children: [
           WebViewWidget(controller: controller),
           // 카카오 로그인 상태 표시 및 버튼
           // Positioned(
@@ -486,7 +522,8 @@ class _WebViewPageState extends State<WebViewPage> {
                 ),
               ),
             ),
-        ],
+          ],
+        ),
       ),
     );
   }
