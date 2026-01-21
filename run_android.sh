@@ -65,7 +65,22 @@ echo "🔄 ADB 연결 확인 중..."
 adb kill-server 2>/dev/null
 sleep 2
 adb start-server 2>/dev/null
-sleep 2
+sleep 3
+
+# 에뮬레이터 연결 재확인
+echo "🔍 에뮬레이터 연결 재확인 중..."
+MAX_RETRY=5
+RETRY_COUNT=0
+while [ $RETRY_COUNT -lt $MAX_RETRY ]; do
+    CONNECTED_DEVICES=$(adb devices | grep "emulator" | awk '{print $1}' | head -n 1)
+    if [ -n "$CONNECTED_DEVICES" ]; then
+        echo "✅ 에뮬레이터 연결 확인: $CONNECTED_DEVICES"
+        break
+    fi
+    RETRY_COUNT=$((RETRY_COUNT + 1))
+    echo "  재시도 $RETRY_COUNT/$MAX_RETRY..."
+    sleep 3
+done
 
 # Flutter 디바이스 확인
 echo "🔍 Flutter 디바이스 확인 중..."
@@ -86,19 +101,34 @@ if [ -z "$ANDROID_DEVICE" ]; then
     ANDROID_DEVICE=$(flutter devices 2>/dev/null | grep -oE "emulator-[0-9]+" | head -n 1)
 fi
 
+# ADB devices에서 직접 찾기
+if [ -z "$ANDROID_DEVICE" ]; then
+    ANDROID_DEVICE=$(adb devices | grep "emulator" | awk '{print $1}' | head -n 1)
+fi
+
 if [ -z "$ANDROID_DEVICE" ]; then
     echo "❌ Android 디바이스를 찾을 수 없습니다."
     echo "📱 현재 연결된 디바이스:"
+    adb devices
     flutter devices
     echo ""
     echo "💡 해결 방법:"
     echo "1. 에뮬레이터가 완전히 부팅될 때까지 기다려주세요"
     echo "2. Android Studio에서 에뮬레이터를 직접 실행해보세요"
     echo "3. 'adb devices' 명령어로 연결 상태를 확인해보세요"
+    echo "4. 에뮬레이터를 수동으로 실행: emulator -avd $EMULATOR_NAME"
     exit 1
 fi
 
 echo "✅ Android 디바이스: $ANDROID_DEVICE"
+
+# 최종 연결 확인
+echo "🔍 최종 연결 확인 중..."
+adb devices | grep "$ANDROID_DEVICE" || {
+    echo "⚠️  디바이스 연결이 불안정합니다. 재연결 시도 중..."
+    adb reconnect
+    sleep 3
+}
 
 # Flutter 앱 실행
 echo "🎯 Flutter 앱 실행 중..."
