@@ -32,6 +32,17 @@
             android:name="flutterEmbedding"
             android:value="2" />
         
+        <!-- 네이버 로그인 설정 -->
+        <meta-data
+            android:name="com.naver.sdk.clientId"
+            android:value="@string/client_id" />
+        <meta-data
+            android:name="com.naver.sdk.clientSecret"
+            android:value="@string/client_secret" />
+        <meta-data
+            android:name="com.naver.sdk.clientName"
+            android:value="@string/client_name" />
+        
         <!-- 카카오 인증 추가: Custom Tabs Activity 및 kakao{NATIVE_APP_KEY}://oauth 리다이렉트 처리 -->
         <activity android:name="com.kakao.sdk.flutter.AuthCodeCustomTabsActivity">
             <intent-filter android:label="flutter_web_auth">
@@ -53,5 +64,9 @@
             <action android:name="android.intent.action.PROCESS_TEXT"/>
             <data android:mimeType="text/plain"/>
         </intent>
+        <!-- 카카오톡 앱 연동을 위한 쿼리 추가 -->
+        <package android:name="com.kakao.talk" />
+        <!-- 네이버 앱 연동을 위한 쿼리 추가 -->
+        <package android:name="com.nhn.android.search" />
     </queries>
 </manifest>

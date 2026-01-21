@@ -110,6 +110,12 @@
       "languageVersion": "3.8"
     },
     {
+      "name": "flutter_naver_login",
+      "rootUri": "file:///Users/mz01-chansm/.pub-cache/hosted/pub.dev/flutter_naver_login-2.1.1",
+      "packageUri": "lib/",
+      "languageVersion": "3.7"
+    },
+    {
       "name": "flutter_svg",
       "rootUri": "file:///Users/mz01-chansm/.pub-cache/hosted/pub.dev/flutter_svg-2.2.3",
       "packageUri": "lib/",

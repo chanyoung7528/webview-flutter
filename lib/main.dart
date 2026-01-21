@@ -4,9 +4,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import 'package:webview_flutter_android/webview_flutter_android.dart';
-import 'package:kakao_flutter_sdk_common/kakao_flutter_sdk_common.dart';
 import 'package:kakao_flutter_sdk_user/kakao_flutter_sdk_user.dart';
 import 'services/kakao_auth_service.dart';
+import 'services/naver_auth_service.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -226,6 +226,13 @@ class _WebViewPageState extends State<WebViewPage> {
           }));
         };
         
+        // 웹에서 네이버 로그인을 요청하는 함수
+        window.requestNaverLogin = function() {
+          FlutterAuthBridge.postMessage(JSON.stringify({
+            action: 'naverLogin'
+          }));
+        };
+        
         // 앱에서 카카오 로그인 결과를 받는 콜백 함수 (웹에서 정의)
         window.onKakaoLoginSuccess = function(data) {
           console.log('카카오 로그인 성공:', data);
@@ -236,12 +243,23 @@ class _WebViewPageState extends State<WebViewPage> {
           console.error('카카오 로그인 실패:', error);
           // 웹에서 이 함수를 오버라이드하여 사용
         };
+        
+        // 앱에서 네이버 로그인 결과를 받는 콜백 함수 (웹에서 정의)
+        window.onNaverLoginSuccess = function(data) {
+          console.log('네이버 로그인 성공:', data);
+          // 웹에서 이 함수를 오버라이드하여 사용
+        };
+        
+        window.onNaverLoginError = function(error) {
+          console.error('네이버 로그인 실패:', error);
+          // 웹에서 이 함수를 오버라이드하여 사용
+        };
       })();
     ''';
     
     try {
       await controller.runJavaScript(bridgeScript);
-      debugPrint('JavaScript 브리지 함수 주입 완료 (카카오 로그인)');
+      debugPrint('JavaScript 브리지 함수 주입 완료 (카카오/네이버 로그인)');
     } catch (e) {
       debugPrint('JavaScript 브리지 주입 실패: $e');
     }
@@ -257,6 +275,8 @@ class _WebViewPageState extends State<WebViewPage> {
       
       if (action == 'kakaoLogin') {
         await _handleKakaoLoginFromWeb();
+      } else if (action == 'naverLogin') {
+        await _handleNaverLoginFromWeb();
       } else {
         debugPrint('알 수 없는 액션: $action');
       }
@@ -298,6 +318,35 @@ class _WebViewPageState extends State<WebViewPage> {
       _sendMessageToWeb('onKakaoLoginError', {
         'error': e.toString(),
         'message': '카카오 로그인에 실패했습니다.',
+      });
+    }
+  }
+
+  // 웹에서 요청한 네이버 로그인 처리
+  Future<void> _handleNaverLoginFromWeb() async {
+    try {
+      debugPrint('웹에서 네이버 로그인 요청 받음');
+      
+      // 네이버 SDK로 로그인 실행
+      final userData = await NaverAuthService.login();
+      
+      if (userData != null && mounted) {
+        setState(() {
+          isLoggedIn = true;
+        });
+        
+        // 로그인 성공 정보를 웹으로 전달
+        _sendMessageToWeb('onNaverLoginSuccess', userData);
+        
+        debugPrint('네이버 로그인 성공, 웹으로 데이터 전송: $userData');
+      } else {
+        throw Exception('네이버 로그인이 취소되었거나 실패했습니다.');
+      }
+    } catch (e) {
+      debugPrint('네이버 로그인 실패: $e');
+      _sendMessageToWeb('onNaverLoginError', {
+        'error': e.toString(),
+        'message': '네이버 로그인에 실패했습니다.',
       });
     }
   }

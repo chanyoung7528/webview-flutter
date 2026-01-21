@@ -57,6 +57,8 @@
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
 			<key>CFBundleURLSchemes</key>
 			<array>
 				<!-- 카카오톡 설정 추가 -->
@@ -70,6 +72,19 @@
 		<!-- KakaoLink -->
 		<string>kakaolink</string>
 		<string>kakaotalk</string>
+		<!-- Naver Login -->
+		<string>naversearchapp</string>
+		<string>naversearchthirdlogin</string>
 	</array>
+
+	<!-- Naver Login 설정 -->
+	<key>NidUrlScheme</key>
+	<string>webviewapp</string>
+	<key>NidClientID</key>
+	<string>JZNfnCB7uZclla3aY0iQ</string>
+	<key>NidClientSecret</key>
+	<string>YOwnxBkpvx</string>
+	<key>NidAppName</key>
+	<string>삼성아파트</string>
 </dict>
 </plist>

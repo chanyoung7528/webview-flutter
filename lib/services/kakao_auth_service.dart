@@ -6,25 +6,40 @@ class KakaoAuthService {
   /// 
   /// 카카오톡이 설치되어 있으면 카카오톡으로 로그인,
   /// 없으면 카카오계정 웹 로그인을 진행합니다.
+  /// 항상 새로운 인증을 요구합니다.
   /// 
   /// Returns: 로그인 성공 시 User 객체, 실패 시 null
   static Future<User?> login() async {
     try {
+      // 기존 액세스 토큰이 있다면 로그아웃하여 강제로 새 로그인 화면 표시
+      // (unlink는 연결 끊기이므로 매번 약관 동의가 필요, logout은 토큰만 삭제)
+      try {
+        await UserApi.instance.logout();
+      } catch (e) {
+        // 토큰이 없는 경우 무시
+        print('기존 토큰 없음 또는 로그아웃 실패 (정상): $e');
+      }
+
       // 휴대폰에 카카오톡이 깔려있는지 확인
       bool installed = await isKakaoTalkInstalled();
 
-      // 카카오톡이 설치되어 있으면 카카오톡으로 로그인
-      // 없으면 카카오계정 웹 로그인
-      OAuthToken token = installed
-          ? await UserApi.instance.loginWithKakaoTalk()
-          : await UserApi.instance.loginWithKakaoAccount();
+      OAuthToken token;
+      if (installed) {
+        // 카카오톡이 설치되어 있으면 카카오톡으로 로그인
+        token = await UserApi.instance.loginWithKakaoTalk();
+      } else {
+        // 카카오계정 웹 로그인 (강제 로그인 화면 표시)
+        token = await UserApi.instance.loginWithKakaoAccount(
+          prompts: [Prompt.login], // 기존 세션이 있어도 항상 로그인 화면 표시
+        );
+      }
 
       // 로그인 성공 후 유저 정보 가져오기
       User user = await UserApi.instance.me();
 
       return user;
     } catch (e) {
-      print(' 실패: $e');
+      print('카카오 로그인 실패: $e');
       rethrow;
     }
   }
