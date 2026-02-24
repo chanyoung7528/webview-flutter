@@ -11,20 +11,45 @@ class NaverAuthService {
   /// 네이버 앱이 설치되어 있으면 네이버 앱으로 로그인,
   /// 없으면 네이버 계정 웹 로그인을 진행합니다.
   /// 
-  /// Returns: 로그인 성공 시 사용자 정보 Map, 실패 시 null
+  /// Returns: 로그인 성공 시 사용자 정보 및 토큰을 포함한 Map, 실패 시 null
   static Future<Map<String, dynamic>?> login() async {
     try {
       final NaverLoginResult result = await FlutterNaverLogin.logIn();
       
       if (result.status == NaverLoginStatus.loggedIn && result.account != null) {
         final account = result.account!;
-        return {
+        
+        // 로그인 성공 후 토큰 가져오기
+        Map<String, dynamic> userData = {
           'id': account.id,
           'nickname': account.nickname,
           'name': account.name,
           'email': account.email,
           'profileImage': account.profileImage,
         };
+        
+        // 토큰 정보 추가
+        try {
+          final NaverToken token = await FlutterNaverLogin.getCurrentAccessToken();
+          if (token.isValid()) {
+            // 토큰 정보 로그
+            print('🔑 네이버 토큰 정보:');
+            print('  - Access Token: ${token.accessToken}');
+            print('  - Refresh Token: ${token.refreshToken}...');
+            print('  - token: ${token}');
+            
+            userData['accessToken'] = token.accessToken;
+            userData['refreshToken'] = token.refreshToken;
+            userData['tokenType'] = token.tokenType;
+            userData['expiresAt'] = token.expiresAt;
+          } else {
+            print('⚠️ 네이버 토큰이 유효하지 않음');
+          }
+        } catch (e) {
+          print('❌ 네이버 토큰 가져오기 실패: $e');
+        }
+        
+        return userData;
       }
       
       return null;

@@ -8,11 +8,22 @@ class KakaoAuthService {
   /// 없으면 카카오계정 웹 로그인을 진행합니다.
   /// 항상 새로운 인증을 요구합니다.
   /// 
-  /// Returns: 로그인 성공 시 User 객체, 실패 시 null
-  static Future<User?> login() async {
+  /// Returns: 로그인 성공 시 User와 토큰 정보를 포함한 Map, 실패 시 null
+  static Future<Map<String, dynamic>?> login() async {
+    // loginWithToken()을 호출하여 중복 코드 제거
+    return await loginWithToken();
+  }
+
+  /// 카카오 로그인 실행 (토큰 포함)
+  /// 
+  /// 카카오톡이 설치되어 있으면 카카오톡으로 로그인,
+  /// 없으면 카카오계정 웹 로그인을 진행합니다.
+  /// 항상 새로운 인증을 요구합니다.
+  /// 
+  /// Returns: 로그인 성공 시 User와 OAuthToken을 포함한 Map, 실패 시 null
+  static Future<Map<String, dynamic>?> loginWithToken() async {
     try {
       // 기존 액세스 토큰이 있다면 로그아웃하여 강제로 새 로그인 화면 표시
-      // (unlink는 연결 끊기이므로 매번 약관 동의가 필요, logout은 토큰만 삭제)
       try {
         await UserApi.instance.logout();
       } catch (e) {
@@ -34,10 +45,23 @@ class KakaoAuthService {
         );
       }
 
+      // 토큰 정보 로그
+      print('🔑 카카오 토큰 정보:');
+      print('  - Access Token: ${token.accessToken}');
+      print('  - Refresh Token: ${token.refreshToken}');
+      print('  - token: ${token}');
+    
+
       // 로그인 성공 후 유저 정보 가져오기
       User user = await UserApi.instance.me();
 
-      return user;
+      return {
+        'user': user,
+        'accessToken': token.accessToken,
+        'refreshToken': token.refreshToken,
+        'idToken': token.idToken,
+        'expiresAt': token.expiresAt,
+      };
     } catch (e) {
       print('카카오 로그인 실패: $e');
       rethrow;

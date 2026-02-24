@@ -1,8 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <!-- 네이버 로그인 설정 -->
-    <string name="client_id">JZNfnCB7uZclla3aY0iQ</string>
+    <!-- <string name="client_id">JZNfnCB7uZclla3aY0iQ</string>
     <string name="client_secret">YOwnxBkpvx</string>
+    <string name="client_name">삼성아파트</string> -->
+    <string name="client_id">QDzbpOiVO9FAQxBKSYZx</string>
+    <string name="client_secret">9wQj7OYxuu</string>
     <string name="client_name">삼성아파트</string>
 </resources>
 

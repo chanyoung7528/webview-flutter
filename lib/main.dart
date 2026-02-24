@@ -9,18 +9,21 @@ import 'services/kakao_auth_service.dart';
 import 'services/naver_auth_service.dart';
 
 void main() {
+  const meSdk = '482c0c7428f3f38d6812fab4f87eb571';
+  const teamSdk = '660a067b3484e8f4455886e633f79436';
   WidgetsFlutterBinding.ensureInitialized();
-  KakaoSdk.init(nativeAppKey: '482c0c7428f3f38d6812fab4f87eb571');
+  KakaoSdk.init(nativeAppKey: teamSdk);
   runApp(const MyApp());
 }
 
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
 
+
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: '삼성아파트',
+      title: '웰피',
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.blue),
         useMaterial3: true,
@@ -46,10 +49,25 @@ class _WebViewPageState extends State<WebViewPage> {
   bool isLoggedIn = false;
 
   String _getLocalhostUrl() {
-    // Android 에뮬레이터의 경우 10.0.2.2가 호스트 머신의 localhost를 가리킴
-    // iOS 시뮬레이터의 경우 localhost를 직접 사용 가능
+    // ⚠️ 실제 기기에서 테스트할 때는 PC의 IP 주소로 변경하세요
+    // 예: 'http://192.168.1.100:3000' 또는 'http://10.0.0.5:3000'
+    // 
+    // PC IP 확인 방법:
+    // macOS: 터미널에서 `ifconfig | grep "inet " | grep -v 127.0.0.1`
+    // Windows: 명령 프롬프트에서 `ipconfig`
+    
+    const bool isRealDevice = true; // 실제 기기면 true, 에뮬레이터면 false
+    const String pcIpAddress = '192.168.1.100'; // ⚠️ 여기에 PC의 실제 IP 입력!
+    
     if (Platform.isAndroid) {
-      return 'https://poc-template-b69b.vercel.app/';
+      if (isRealDevice) {
+        // 실제 기기: PC의 실제 IP 주소 사용
+        // return 'https://poc-template-gamma.vercel.app/';
+        return 'https://app-dev.wellfy.co.kr';
+      } else {
+        // 에뮬레이터: 10.0.2.2 사용
+        return 'http://10.0.2.2:3000';
+      }
     } else if (Platform.isIOS) {
       return 'http://localhost:3000';
     }
@@ -79,16 +97,25 @@ class _WebViewPageState extends State<WebViewPage> {
           _handleWebMessage(message.message);
         },
       )
+      ..addJavaScriptChannel(
+        'NativeApp',
+        onMessageReceived: (JavaScriptMessage message) {
+          _handleNativeAppMessage(message.message);
+        },
+      )
       ..setNavigationDelegate(
         NavigationDelegate(
           onPageStarted: (String url) {
+            debugPrint('🌐 페이지 로드 시작: $url');
             if (mounted) {
               setState(() {
                 isLoading = true;
+                errorMessage = null; // 에러 메시지 초기화
               });
             }
           },
           onPageFinished: (String url) {
+            debugPrint('✅ 페이지 로드 완료: $url');
             if (mounted) {
               setState(() {
                 isLoading = false;
@@ -98,19 +125,30 @@ class _WebViewPageState extends State<WebViewPage> {
             _injectJavaScriptBridge();
           },
           onWebResourceError: (WebResourceError error) {
-            debugPrint('WebView error: ${error.description}');
-            debugPrint('Error code: ${error.errorCode}');
-            debugPrint('Error type: ${error.errorType}');
-            debugPrint('Failed URL: ${error.url}');
+            debugPrint('❌ WebView 에러 발생!');
+            debugPrint('  - Description: ${error.description}');
+            debugPrint('  - Error Code: ${error.errorCode}');
+            debugPrint('  - Error Type: ${error.errorType}');
+            debugPrint('  - Failed URL: ${error.url}');
+            debugPrint('  - Error Code 상세:');
+            debugPrint('    6 = ERR_CONNECTION_REFUSED (서버 연결 거부)');
+            debugPrint('    2 = ERR_INTERNET_DISCONNECTED (인터넷 연결 없음)');
+            debugPrint('    3 = ERR_NAME_NOT_RESOLVED (DNS 해석 실패)');
+            
             // 에러 발생 시 로딩 상태 해제 및 에러 메시지 표시
             if (mounted) {
               setState(() {
                 isLoading = false;
                 errorMessage = '연결 오류: ${error.description}\n'
                     'URL: ${error.url}\n'
-                    '에러 코드: ${error.errorCode}';
+                    '에러 코드: ${error.errorCode}\n'
+                    '에러 타입: ${error.errorType}';
               });
             }
+          },
+          onNavigationRequest: (NavigationRequest request) {
+            debugPrint('🔗 네비게이션 요청: ${request.url}');
+            return NavigationDecision.navigate;
           },
         ),
       );
@@ -160,12 +198,18 @@ class _WebViewPageState extends State<WebViewPage> {
   // 카카오 로그인 실행
   Future<void> _handleKakaoLogin() async {
     try {
-      final user = await KakaoAuthService.login();
-      if (mounted) {
+      final result = await KakaoAuthService.login();
+      if (result != null && mounted) {
+        final user = result['user'] as User?;
+        final accessToken = result['accessToken'] as String?;
+        
         setState(() {
           isLoggedIn = true;
-          currentUser = user;
+          currentUser = user;  // User 객체를 저장
         });
+        
+        debugPrint('🔑 카카오 로그인 Access Token (전체): $accessToken');
+        
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('로그인 성공! ${user?.kakaoAccount?.profile?.nickname ?? "사용자"}님 환영합니다.'),
@@ -215,10 +259,90 @@ class _WebViewPageState extends State<WebViewPage> {
     }
   }
 
+  // 네이티브 앱 메시지 처리
+  Future<void> _handleNativeAppMessage(String message) async {
+    try {
+      final data = jsonDecode(message) as Map<String, dynamic>;
+      final type = data['type'] as String?;
+      
+      debugPrint('📱 네이티브 앱 메시지 수신: $type');
+      
+      if (type == 'onPopupClose') {
+        debugPrint('🔴 팝업 닫기 요청');
+        // 알럿 표시 후 확인 시 닫기
+        if (mounted) {
+          final shouldClose = await showDialog<bool>(
+            context: context,
+            builder: (context) => AlertDialog(
+              title: const Text('알림'),
+              content: const Text('정말 닫으시겠습니까?'),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(false),
+                  child: const Text('취소'),
+                ),
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(true),
+                  child: const Text('확인'),
+                ),
+              ],
+            ),
+          );
+          
+          // 확인 버튼을 누르면 닫기
+          if (shouldClose == true && mounted) {
+            if (Navigator.of(context).canPop()) {
+              Navigator.of(context).pop();
+            } else {
+              // 더 이상 뒤로 갈 페이지가 없으면 앱 종료
+              SystemNavigator.pop();
+            }
+          }
+        }
+      } else if (type == 'onPopupOpen') {
+        debugPrint('🟢 팝업 열기 요청');
+        // 팝업 열기 처리 (필요시 구현)
+      } else {
+        debugPrint('알 수 없는 네이티브 앱 메시지 타입: $type');
+      }
+    } catch (e) {
+      debugPrint('네이티브 앱 메시지 처리 실패: $e');
+    }
+  }
+
   // JavaScript 브리지 함수 주입 (웹에서 사용할 수 있도록)
   Future<void> _injectJavaScriptBridge() async {
     const bridgeScript = '''
       (function() {
+        // NativeApp 인터페이스 설정
+        window.NativeApp = {
+          onPopupClose: function() {
+            NativeApp.postMessage(JSON.stringify({
+              type: 'onPopupClose'
+            }));
+          },
+          onPopupOpen: function() {
+            NativeApp.postMessage(JSON.stringify({
+              type: 'onPopupOpen'
+            }));
+          }
+        };
+        
+        // iOS WebKit 메시지 핸들러 호환성 (Flutter WebView는 자동 처리)
+        if (!window.webkit) {
+          window.webkit = {};
+        }
+        if (!window.webkit.messageHandlers) {
+          window.webkit.messageHandlers = {};
+        }
+        if (!window.webkit.messageHandlers.NativeApp) {
+          window.webkit.messageHandlers.NativeApp = {
+            postMessage: function(message) {
+              NativeApp.postMessage(JSON.stringify(message));
+            }
+          };
+        }
+        
         // 웹에서 카카오 로그인을 요청하는 함수
         window.requestKakaoLogin = function() {
           FlutterAuthBridge.postMessage(JSON.stringify({
@@ -254,12 +378,14 @@ class _WebViewPageState extends State<WebViewPage> {
           console.error('네이버 로그인 실패:', error);
           // 웹에서 이 함수를 오버라이드하여 사용
         };
+        
+        console.log('✅ NativeApp 인터페이스 초기화 완료');
       })();
     ''';
     
     try {
       await controller.runJavaScript(bridgeScript);
-      debugPrint('JavaScript 브리지 함수 주입 완료 (카카오/네이버 로그인)');
+      debugPrint('JavaScript 브리지 함수 주입 완료 (카카오/네이버 로그인 + NativeApp)');
     } catch (e) {
       debugPrint('JavaScript 브리지 주입 실패: $e');
     }
@@ -291,30 +417,42 @@ class _WebViewPageState extends State<WebViewPage> {
     try {
       debugPrint('웹에서 카카오 로그인 요청 받음');
       
-      // 카카오 SDK로 로그인 실행
-      final user = await KakaoAuthService.login();
+      // 카카오 SDK로 로그인 실행 (토큰 포함)
+      final result = await KakaoAuthService.login();
       
-      if (mounted) {
+      if (result != null && mounted) {
+        final user = result['user'] as User?;
+        final accessToken = result['accessToken'] as String?;
+        final refreshToken = result['refreshToken'] as String?;
+        
         setState(() {
           isLoggedIn = true;
           currentUser = user;
         });
         
-        // 로그인 성공 정보를 웹으로 전달
+        // 로그인 성공 정보를 웹으로 전달 (토큰 포함)
         final userData = {
           'id': user?.id.toString(),
           'nickname': user?.kakaoAccount?.profile?.nickname,
           'email': user?.kakaoAccount?.email,
           'profileImage': user?.kakaoAccount?.profile?.profileImageUrl,
           'cid': user?.id.toString(), // CID는 사용자 ID로 사용
+          'accessToken': accessToken, // 카카오 액세스 토큰
+          'refreshToken': refreshToken, // 카카오 리프레시 토큰
         };
         
         _sendMessageToWeb('onKakaoLoginSuccess', userData);
         
-        debugPrint('카카오 로그인 성공, 웹으로 데이터 전송: $userData');
+        debugPrint('✅ 카카오 로그인 성공!');
+        debugPrint('📤 웹으로 전송할 데이터:');
+        debugPrint('  - ID: ${userData['id']}');
+        debugPrint('  - Nickname: ${userData['nickname']}');
+        debugPrint('  - Email: ${userData['email']}');
+        debugPrint('  - Access Token (전체): $accessToken');
+        debugPrint('  - Refresh Token (전체): $refreshToken');
       }
     } catch (e) {
-      debugPrint('카카오 로그인 실패: $e');
+      debugPrint('❌ 카카오 로그인 실패: $e');
       _sendMessageToWeb('onKakaoLoginError', {
         'error': e.toString(),
         'message': '카카오 로그인에 실패했습니다.',
