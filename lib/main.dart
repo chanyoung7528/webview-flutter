@@ -41,7 +41,7 @@ class WebViewPage extends StatefulWidget {
   State<WebViewPage> createState() => _WebViewPageState();
 }
 
-class _WebViewPageState extends State<WebViewPage> {
+class _WebViewPageState extends State<WebViewPage> with WidgetsBindingObserver {
   late final WebViewController controller;
   bool isLoading = true;
   String? errorMessage;
@@ -77,6 +77,7 @@ class _WebViewPageState extends State<WebViewPage> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     
     // 상태바를 투명하게 설정 (풀스크린)
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
@@ -120,9 +121,10 @@ class _WebViewPageState extends State<WebViewPage> {
               setState(() {
                 isLoading = false;
               });
+              // 페이지 로드 완료 후 JavaScript 브리지 + safe-area 주입
+              _injectJavaScriptBridge();
+              _injectSafeAreaInsets();
             }
-            // 페이지 로드 완료 후 JavaScript 브리지 함수 주입
-            _injectJavaScriptBridge();
           },
           onWebResourceError: (WebResourceError error) {
             debugPrint('❌ WebView 에러 발생!');
@@ -174,6 +176,21 @@ class _WebViewPageState extends State<WebViewPage> {
           isLoading = false;
         });
       }
+    }
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  // 키보드 올라오거나 내려갈 때 safe-area 값 재주입
+  @override
+  void didChangeMetrics() {
+    super.didChangeMetrics();
+    if (!isLoading) {
+      _injectSafeAreaInsets();
     }
   }
 
@@ -379,13 +396,51 @@ class _WebViewPageState extends State<WebViewPage> {
           // 웹에서 이 함수를 오버라이드하여 사용
         };
         
-        console.log('✅ NativeApp 인터페이스 초기화 완료');
+        // ===== 본인인증 브릿지 =====
+        
+        // flutter_inappwebview 호환 인터페이스 설정
+        window.flutter_inappwebview = {
+          callHandler: function(handlerName, data) {
+            console.log('[IDV Bridge] callHandler 호출:', handlerName, data);
+            FlutterAuthBridge.postMessage(JSON.stringify({
+              action: handlerName,
+              data: data
+            }));
+          }
+        };
+        
+        // 테스트용: URL 없이 호출하면 앱이 example.com으로 In-App Browser 띄움
+        window.openTestAuthWindow = function() {
+          console.log('[IDV Bridge] 테스트 In-App Browser 열기 (example.com)');
+          FlutterAuthBridge.postMessage(JSON.stringify({
+            action: 'openAuth',
+            data: { type: 'OPEN_AUTH' }
+          }));
+        };
+        
+        // 본인인증 콜백 함수들 (웹에서 정의/오버라이드 가능)
+        window.onAuthSuccess = function(data) {
+          console.log('[IDV Bridge] 본인인증 성공:', data);
+          // 웹에서 이 함수를 오버라이드하여 사용
+        };
+        
+        window.onAuthError = function(error) {
+          console.error('[IDV Bridge] 본인인증 실패:', error);
+          // 웹에서 이 함수를 오버라이드하여 사용
+        };
+        
+        window.onAuthCancel = function() {
+          console.log('[IDV Bridge] 본인인증 취소');
+          // 웹에서 이 함수를 오버라이드하여 사용
+        };
+        
+        console.log('✅ NativeApp 및 본인인증 브릿지 초기화 완료');
       })();
     ''';
     
     try {
       await controller.runJavaScript(bridgeScript);
-      debugPrint('JavaScript 브리지 함수 주입 완료 (카카오/네이버 로그인 + NativeApp)');
+      debugPrint('JavaScript 브리지 함수 주입 완료 (카카오/네이버 로그인 + NativeApp + 본인인증)');
     } catch (e) {
       debugPrint('JavaScript 브리지 주입 실패: $e');
     }
@@ -403,12 +458,84 @@ class _WebViewPageState extends State<WebViewPage> {
         await _handleKakaoLoginFromWeb();
       } else if (action == 'naverLogin') {
         await _handleNaverLoginFromWeb();
+      } else if (action == 'openAuth') {
+        // 본인인증 요청 처리
+        final authData = data['data'] as Map<String, dynamic>?;
+        if (authData != null) {
+          await _handleOpenAuth(authData);
+        } else {
+          debugPrint('❌ 본인인증 데이터가 없습니다.');
+        }
       } else {
         debugPrint('알 수 없는 액션: $action');
       }
     } catch (e) {
       debugPrint('웹 메시지 처리 실패: $e');
       _sendMessageToWeb('onKakaoLoginError', {'error': e.toString()});
+    }
+  }
+
+  /// 테스트용 URL (본인인증 URL 없이 In-App Browser만 확인할 때 사용)
+  /// - 폼 페이지라 본인인증 입력 단계 느낌으로 테스트하기 좋음
+  static const String _testAuthUrl = 'https://httpbin.org/forms/post';
+
+  // 본인인증 열기 처리
+  Future<void> _handleOpenAuth(Map<String, dynamic> authData) async {
+    try {
+      final rawUrl = authData['url'] as String?;
+      final type = authData['type'] as String?;
+      
+      // URL 없으면 테스트용 URL로 In-App Browser만 띄워서 동작 확인
+      final String authUrl;
+      if (rawUrl == null || rawUrl.isEmpty) {
+        debugPrint('⚠️ [IDV Bridge] 본인인증 URL 없음 → 테스트 URL로 In-App Browser 띄움');
+        authUrl = _testAuthUrl;
+      } else {
+        authUrl = rawUrl;
+      }
+      
+      debugPrint('🔐 [IDV Bridge] 본인인증 요청 수신');
+      debugPrint('  - Type: $type');
+      debugPrint('  - URL: $authUrl');
+      
+      if (!mounted) return;
+      
+      // In-App Browser로 본인인증 페이지 열기
+      final result = await Navigator.of(context).push<Map<String, dynamic>>(
+        MaterialPageRoute(
+          builder: (context) => AuthWebViewPage(
+            authUrl: authUrl,
+            onResult: (result) {
+              Navigator.of(context).pop(result);
+            },
+          ),
+          fullscreenDialog: true,
+        ),
+      );
+      
+      // 결과 처리
+      if (result != null) {
+        final success = result['success'] as bool? ?? false;
+        
+        if (success) {
+          debugPrint('✅ [IDV Bridge] 본인인증 성공');
+          _sendMessageToWeb('onAuthSuccess', result);
+        } else {
+          debugPrint('❌ [IDV Bridge] 본인인증 실패');
+          _sendMessageToWeb('onAuthError', result);
+        }
+      } else {
+        debugPrint('⚠️ [IDV Bridge] 본인인증 취소');
+        _sendMessageToWeb('onAuthCancel', {
+          'message': '사용자가 본인인증을 취소했습니다.',
+        });
+      }
+    } catch (e) {
+      debugPrint('❌ [IDV Bridge] 본인인증 처리 중 오류 발생: $e');
+      _sendMessageToWeb('onAuthError', {
+        'error': e.toString(),
+        'message': '본인인증 처리 중 오류가 발생했습니다.',
+      });
     }
   }
 
@@ -489,6 +616,46 @@ class _WebViewPageState extends State<WebViewPage> {
     }
   }
 
+  // Flutter에서 읽은 safe-area / 키보드 inset 값을 웹 CSS 변수로 주입
+  Future<void> _injectSafeAreaInsets() async {
+    if (!mounted) return;
+
+    final padding = MediaQuery.of(context).padding;
+    final viewInsets = MediaQuery.of(context).viewInsets;
+    final pixelRatio = MediaQuery.of(context).devicePixelRatio;
+
+    // dp → px 변환 없이 CSS px 단위 그대로 사용 (WebView의 1px = 1dp)
+    final top = padding.top;
+    final bottom = padding.bottom;
+    final left = padding.left;
+    final right = padding.right;
+    final keyboardHeight = viewInsets.bottom;
+
+    final script = '''
+      (function() {
+        var root = document.documentElement;
+
+        // 네비게이션 바 / 노치 등 시스템 영역 inset
+        root.style.setProperty('--sat', '${top}px');
+        root.style.setProperty('--sar', '${right}px');
+        root.style.setProperty('--sab', '${bottom}px');
+        root.style.setProperty('--sal', '${left}px');
+
+        // 키보드 높이 (올라와 있을 때만 양수)
+        root.style.setProperty('--keyboard-height', '${keyboardHeight}px');
+
+        console.log('[SafeArea] top=${top} right=${right} bottom=${bottom} left=${left} keyboard=${keyboardHeight}');
+      })();
+    ''';
+
+    try {
+      await controller.runJavaScript(script);
+      debugPrint('SafeArea 주입 완료: top=$top, bottom=$bottom, keyboard=$keyboardHeight');
+    } catch (e) {
+      debugPrint('SafeArea 주입 실패: $e');
+    }
+  }
+
   // 웹으로 메시지 전송
   Future<void> _sendMessageToWeb(String callbackName, Map<String, dynamic> data) async {
     try {
@@ -530,7 +697,11 @@ class _WebViewPageState extends State<WebViewPage> {
   @override
   Widget build(BuildContext context) {
     final url = _getLocalhostUrl();
-    
+
+    // Flutter에서 실제 safe-area inset 값을 읽어 웹으로 주입
+    final mediaPadding = MediaQuery.of(context).padding;
+    final viewInsets = MediaQuery.of(context).viewInsets;
+
     return PopScope(
       canPop: false, // 기본 뒤로가기 동작 방지
       onPopInvoked: (bool didPop) async {
@@ -569,6 +740,9 @@ class _WebViewPageState extends State<WebViewPage> {
       },
       child: Scaffold(
         backgroundColor: Colors.white,
+        // 키보드가 올라와도 WebView 높이를 줄이지 않음
+        // 웹 내부에서 CSS env(keyboard-inset-height) 또는 JS로 직접 처리
+        resizeToAvoidBottomInset: false,
         body: Stack(
           children: [
           WebViewWidget(controller: controller),
@@ -711,6 +885,220 @@ class _WebViewPageState extends State<WebViewPage> {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// 본인인증용 In-App Browser 페이지
+class AuthWebViewPage extends StatefulWidget {
+  final String authUrl;
+  final Function(Map<String, dynamic>) onResult;
+
+  const AuthWebViewPage({
+    super.key,
+    required this.authUrl,
+    required this.onResult,
+  });
+
+  @override
+  State<AuthWebViewPage> createState() => _AuthWebViewPageState();
+}
+
+class _AuthWebViewPageState extends State<AuthWebViewPage> {
+  late final WebViewController authController;
+  bool isLoading = true;
+  String currentUrl = '';
+
+  @override
+  void initState() {
+    super.initState();
+    
+    authController = WebViewController()
+      ..setJavaScriptMode(JavaScriptMode.unrestricted)
+      ..setBackgroundColor(Colors.white)
+      ..addJavaScriptChannel(
+        'AuthResult',
+        onMessageReceived: (JavaScriptMessage message) {
+          _handleAuthResult(message.message);
+        },
+      )
+      ..setNavigationDelegate(
+        NavigationDelegate(
+          onPageStarted: (String url) {
+            debugPrint('🔐 [IDV Browser] 페이지 로드 시작: $url');
+            if (mounted) {
+              setState(() {
+                isLoading = true;
+                currentUrl = url;
+              });
+            }
+          },
+          onPageFinished: (String url) {
+            debugPrint('✅ [IDV Browser] 페이지 로드 완료: $url');
+            if (mounted) {
+              setState(() {
+                isLoading = false;
+                currentUrl = url;
+              });
+            }
+            
+            // 본인인증 완료 체크 (URL 패턴으로 감지)
+            _checkAuthCompletion(url);
+          },
+          onNavigationRequest: (NavigationRequest request) {
+            debugPrint('🔗 [IDV Browser] 네비게이션 요청: ${request.url}');
+            
+            // 특정 URL 패턴에 따라 완료/취소 판단
+            if (request.url.contains('/auth/success') || 
+                request.url.contains('/auth/complete')) {
+              // 성공 페이지로 이동하는 경우
+              _handleAuthSuccess(request.url);
+              return NavigationDecision.prevent;
+            } else if (request.url.contains('/auth/cancel') || 
+                       request.url.contains('/auth/fail')) {
+              // 취소/실패 페이지로 이동하는 경우
+              _handleAuthCancel(request.url);
+              return NavigationDecision.prevent;
+            }
+            
+            return NavigationDecision.navigate;
+          },
+        ),
+      );
+    
+    // Android WebView 특정 설정
+    if (Platform.isAndroid) {
+      final androidController = authController.platform as AndroidWebViewController;
+      androidController.setMediaPlaybackRequiresUserGesture(false);
+    }
+    
+    // 본인인증 URL 로드
+    authController.loadRequest(Uri.parse(widget.authUrl));
+  }
+
+  // 본인인증 완료 체크 (URL 기반)
+  void _checkAuthCompletion(String url) {
+    // URL 파라미터에서 인증 결과 추출
+    try {
+      final uri = Uri.parse(url);
+      
+      // 성공 케이스
+      if (uri.path.contains('/success') || uri.path.contains('/complete')) {
+        final resultData = {
+          'success': true,
+          'data': uri.queryParameters,
+          'url': url,
+        };
+        widget.onResult(resultData);
+      }
+      // 실패 케이스
+      else if (uri.path.contains('/fail') || uri.path.contains('/error')) {
+        final resultData = {
+          'success': false,
+          'error': uri.queryParameters['error'] ?? 'UNKNOWN_ERROR',
+          'message': uri.queryParameters['message'] ?? '본인인증에 실패했습니다.',
+          'url': url,
+        };
+        widget.onResult(resultData);
+      }
+    } catch (e) {
+      debugPrint('❌ [IDV Browser] URL 파싱 실패: $e');
+    }
+  }
+
+  // 본인인증 결과 처리 (JavaScript 메시지)
+  void _handleAuthResult(String message) {
+    try {
+      final data = jsonDecode(message) as Map<String, dynamic>;
+      debugPrint('✅ [IDV Browser] JavaScript에서 인증 결과 수신: $data');
+      widget.onResult(data);
+    } catch (e) {
+      debugPrint('❌ [IDV Browser] 인증 결과 파싱 실패: $e');
+    }
+  }
+
+  // 본인인증 성공 처리
+  void _handleAuthSuccess(String url) {
+    debugPrint('✅ [IDV Browser] 본인인증 성공 URL 감지: $url');
+    
+    try {
+      final uri = Uri.parse(url);
+      final resultData = {
+        'success': true,
+        'data': uri.queryParameters,
+        'url': url,
+      };
+      widget.onResult(resultData);
+    } catch (e) {
+      debugPrint('❌ [IDV Browser] 성공 URL 파싱 실패: $e');
+      widget.onResult({
+        'success': true,
+        'url': url,
+      });
+    }
+  }
+
+  // 본인인증 취소 처리
+  void _handleAuthCancel(String url) {
+    debugPrint('⚠️ [IDV Browser] 본인인증 취소 URL 감지: $url');
+    
+    widget.onResult({
+      'success': false,
+      'error': 'USER_CANCEL',
+      'message': '사용자가 본인인증을 취소했습니다.',
+      'url': url,
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.white,
+      appBar: AppBar(
+        title: const Text('본인인증'),
+        leading: IconButton(
+          icon: const Icon(Icons.close),
+          onPressed: () {
+            // 뒤로가기 시 취소로 처리
+            widget.onResult({
+              'success': false,
+              'error': 'USER_CANCEL',
+              'message': '사용자가 본인인증을 취소했습니다.',
+            });
+          },
+        ),
+        actions: [
+          if (!isLoading)
+            IconButton(
+              icon: const Icon(Icons.refresh),
+              onPressed: () {
+                authController.reload();
+              },
+            ),
+        ],
+      ),
+      body: Stack(
+        children: [
+          WebViewWidget(controller: authController),
+          if (isLoading)
+            Container(
+              color: Colors.white,
+              child: const Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    CircularProgressIndicator(),
+                    SizedBox(height: 16),
+                    Text(
+                      '본인인증 페이지를 불러오는 중...',
+                      style: TextStyle(fontSize: 16, color: Colors.grey),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+        ],
       ),
     );
   }
